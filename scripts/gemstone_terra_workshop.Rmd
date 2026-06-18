@@ -1,0 +1,234 @@
+---
+title: GEMSTONE Terra Workshop
+author: 
+date:
+---
+
+# Import packages and setup workspace variables
+
+Load required packages. AnVIL lets you read data tables in Terra.
+
+```{r}
+BiocManager::install("AnVILGCP")
+library(AnVILGCP)
+library(reticulate) # Iteroperability between R and Python
+library(googleCloudStorageR) # Functions to interact with Google Buckets
+
+# Data stuff
+install.packages("lme4")
+library(dplyr)
+library(tidyr)
+library(lme4)
+
+# Use ape for phylogenetic analysis
+install.packages("ape")
+library(ape)
+
+# import the Python FISS API to interact with Terra
+fapi <- import("firecloud.api") 
+```
+
+Load environment variables with workspace informaion into R variables so that we can more easily use them in the future.
+
+```{r}
+project <- Sys.getenv('WORKSPACE_NAMESPACE')
+workspace <- Sys.getenv('WORKSPACE_NAME')
+bucket <- Sys.getenv('WORKSPACE_BUCKET')
+
+# Define the Google Cloud Storage bucket so we can use the GCP R library
+gcs_global_bucket(bucket)
+# Authenticate so we can fetch data from Google Cloud Storage
+gcs_auth()
+```
+
+# Submit the GEMSTONE _C. auris_ workflow
+
+The standard GEMSTONE _C. auris_ workflow uses CladeTyper to determine _C. auris_ clades for each sample. We will use the Terra GUI and the FISS API to run this workflow in Terra. But first, we must load the Terra entity data tables with sample information, and subset them.
+
+## Load required tables
+
+We will now read the _cauris_sample_ and _resident_ data tables from the workspace. Because we are working from within the workspace containing the data tables, we only need to use the `avtable()` function. However, we could also read tables from other workspaces, such as the DSSC one, using `avworkspace("gemstone-dssc/GEMSTONE%20-%20DSSC")`, followed by `avtable(table_name)`.
+
+```{r}
+# Print a list of existing data tables
+workspace_tables <- # <<< add your code here >>>
+print(paste("Sample tables present in this workspace are:", 
+            as.character(workspace_tables[,1])))
+
+# Load C. auris isolate table
+cauris <- # <<< add your code here >>>
+# Load table with resident metadata
+resident <- # <<< add your code here >>>
+
+# Inspect the cauris_sample table
+# <<< add your code here >>>
+```
+
+## Submit the workflow
+We will run the GEMSTONE _C. auris_ workflow for the 10 samples in the _cauris_sample_ table. 
+The table has 11 columns:
+
+* *cauris_sample_id*: the sample ID;
+* *raw_reads1* and *raw_reads2*: FASTQ files with Illumina sequencing data, which will be used as inputs to the workflow;
+* *project*: the study from which the isolate originated (e.g., CLEAN or GEMSTONE);
+* *site*: the swab site;
+* *nh_code*: the nursing home from which the isolate was collected;
+* *culture_id*: a unique ID for each isolate. Multiple sequencing versions for the same isolate have the same culture ID, but different sample IDs;
+* *organism*: the MDRO type;
+* *swab_id*: a unique ID for the swab;
+* *record_id*: the record ID for the host from which the isolate was collected. The same person or object sampled at different time points has different record IDs;
+* *species*: the species or genus, as determined by the lab. Required for the GEMSTONE _C. auris_ workflow.
+
+Before submitting the workflow, we must import the _FungalQC_ workflow to the workspace and define the inputs. After that is done, we can create a sample set for all samples in the `cauris_sample` table and submit the workflow.
+
+```{r}
+
+# First, we need to create an entity set containing all the samples we want to run the workflow for
+cauris_set_id <- # <<< add your code here >>>  # Define your custom set name
+sample_ids <- # <<< add your code here >>>
+
+# This dataframe must have two specific columns: the set ID and the targeted entity ID
+cauris_set <- # <<< add your code here >>>
+
+# Format the table names for Terra's data model ('membership:' and '_id' suffixes)
+# <<< add your code here >>>
+
+# Upload to Terra
+# <<< add your code here >>>
+
+# Define the name of the workflow to run
+workflow_name <- # <<< add your code here >>>
+
+# Pull existing inputs into an R environment variable
+# Note: you can define the inputs and outputs in the Terra GUI and load them here
+wf_config <- # <<< add your code here >>>
+
+# Define inputs 
+# <<< add your code here >>>
+
+# Change the configuration settings to point to your new set entity type
+# <<< add your code here >>>
+  
+# Push changes to Terra
+# <<< add your code here >>>
+  
+# Submit workflows
+submission <- # <<< add your code here >>>
+
+if (submission$status_code == 201) {
+  print("Job submitted.")
+} else {
+  print("Submission failed: ")
+  print(submission)
+}
+
+
+```
+
+# Determine the clade for each isolate
+The column `cladetyper_clade` contains the _C. auris_ clade assignments for each isolate. We will determine how many isolates of which clade were sampled, and generate a phylogenetic tree for Clade I isolates.
+
+```{r}
+# Reload the cauris table so it includes the workflow outputs
+cauris <- avtable("cauris_sample")
+
+# Count the number of isolates per clade and NH
+clade_counts <- # <<< add your code here >>>
+
+print("Number of clade types per nursing home:")
+print(clade_counts)
+```
+
+Now, we will create entity sets containing the isolates from each clade and upload them to Terra.
+
+```{r}
+for (clade in unique(cauris$cladetyper_clade)) {
+  
+  # Subset sample IDs from this clade
+  clade_ids <- (cauris %>% filter(cladetyper_clade == clade))$cauris_sample_id
+  clade_set <- # <<< add your code here >>>
+  
+  # Format the table names for Terra's data model ('membership:' and '_id' suffixes)
+  # <<< add your code here >>>
+  
+  # Upload to Terra
+  # <<< add your code here >>>
+
+}
+```
+
+We will generate a phylogenetic tree for Clade I isolates. For this, we will use the [FungalTree workflow](https://dockstore.org/workflows/github.com/broadinstitute/idmp-fungal-pipelines/FungalTree) through the Terra GUI.
+
+First, import this workflow into the Terra workspace; then, define the inputs, select the Clade I isolates from the `cauris_sample_set` table, and run the workflow.
+
+Let's read the outputs from the workflow and plot the phylogenetic tree. The tree, in Newick format, is in the `IqTree2_ml_tree` column.
+
+```{r, fig.width=8, fig.height=6}
+# Load the entity set table with the FungalTree outputs
+cauris_set <- # <<< add your code here >>>
+
+clade <- "Clade1"
+newick_col <- "iqtree2_ml_tree" # Column with Newick tree
+
+# Read Newick file from the Google Bucket
+newick <- # <<< add your code here >>>
+# Read the first line (the Newick tree) from the stream
+newick  <- # <<< add your code here >>>
+
+# Use ape to plot the tree
+tree <- # <<< add your code here >>>
+
+plot(
+  tree,
+  edge.width = 1,
+  label.offset = 0.01,
+  cex = 1,
+  no.margin = FALSE
+)
+
+title(
+  paste(c("C. auris", clade, "tree"), collapse=" ")
+)
+```
+
+# Resident characteristics associated with _C. auris_ clade 1
+
+We will search for resident characteristics associated with colonization with clade I _C. auris_ versus clade III.
+
+First, we need to merge the `cauris_sample` and `resident` tables, based on the `record_id`. The `resident` table contains resident metadata, which we will need for our analyses.
+
+```{r}
+# Read the retrospective C. auris table
+cauris_retro <- avtable("cauris_sample_retrospective")
+
+# Join the cauris_retro and resident tables
+data <- # <<< add your code here >>>
+
+# Remove columns with all NaNs
+data <- # <<< add your code here >>>
+
+print(
+  paste0(
+    c("Merged table has", ncol(data), "columns. There are", sum(is.na(data$record_id)),
+      "samples without a record ID, and", sum(is.na(data$cladetyper_clade)), 
+      "without a C. auris clade assigned."),
+    collapse = " "
+  )
+)
+
+# Remove samples without clade assignments; keep samples with 
+# status == preferred, and remove samples without a unique person ID
+data <- # <<< add your code here >>>
+
+print(
+  paste0(c("Kept", nrow(data), "C. auris isolates."), collapse=" ")
+)
+
+```
+
+We can now search for associations between clade type and resident characteristics, sample data, or other genomic information.
+
+```{r}
+# Do your own analyses here. Looking forward to see what you find!
+# <<< add your code here >>>
+```
